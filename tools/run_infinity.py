@@ -103,12 +103,20 @@ def gen_one_img(
         cfg_list = [cfg_list] * len(scale_schedule)
     if not isinstance(tau_list, list):
         tau_list = [tau_list] * len(scale_schedule)
+
+    infinity_test.cpu()
+    text_encoder.cuda()
+    torch.cuda.empty_cache()
     text_cond_tuple = encode_prompt(text_tokenizer, text_encoder, prompt, enable_positive_prompt)
     if negative_prompt:
         negative_label_B_or_BLT = encode_prompt(text_tokenizer, text_encoder, negative_prompt)
     else:
         negative_label_B_or_BLT = None
     print(f'cfg: {cfg_list}, tau: {tau_list}')
+
+    text_encoder.cpu()
+    infinity_test.cuda()
+    torch.cuda.empty_cache()
     with torch.cuda.amp.autocast(enabled=True, dtype=torch.bfloat16, cache_enabled=True):
         stt = time.time()
         _, _, img_list = infinity_test.autoregressive_infer_cfg(
@@ -175,7 +183,7 @@ def load_infinity(
 ):
     print(f'[Loading Infinity]')
     text_maxlen = 512
-    with torch.cuda.amp.autocast(enabled=True, dtype=torch.bfloat16, cache_enabled=True), torch.no_grad():
+    with torch.amp.autocast(device_type='cuda', enabled=True, dtype=torch.bfloat16, cache_enabled=True), torch.no_grad():
         infinity_test: Infinity = Infinity(
             vae_local=vae, text_channels=text_channels, text_maxlen=text_maxlen,
             shared_aln=True, raw_scale_schedule=scale_schedule,
@@ -196,21 +204,28 @@ def load_infinity(
         ).to(device=device)
         print(f'[you selected Infinity with {model_kwargs=}] model size: {sum(p.numel() for p in infinity_test.parameters())/1e9:.2f}B, bf16={bf16}')
 
-        if bf16:
-            for block in infinity_test.unregistered_blocks:
-                block.bfloat16()
-
         infinity_test.eval()
         infinity_test.requires_grad_(False)
 
         infinity_test.cuda()
         torch.cuda.empty_cache()
 
-        print(f'[Load Infinity weights]')
-        state_dict = torch.load(model_path, map_location=device)
+    print(f'[Load Infinity weights]')
+    state_dict = torch.load(model_path, map_location='cpu')
+    if bf16:
+        for key in state_dict:
+            if isinstance(state_dict[key], torch.Tensor):
+                state_dict[key] = state_dict[key].to(dtype=torch.bfloat16)
+    
+    with torch.amp.autocast(device_type='cuda', enabled=True, dtype=torch.bfloat16, cache_enabled=True), torch.no_grad():
         print(infinity_test.load_state_dict(state_dict))
-        infinity_test.rng = torch.Generator(device=device)
-        return infinity_test
+    infinity_test = infinity_test.to(dtype=torch.bfloat16)
+
+    if bf16:
+        for block in infinity_test.unregistered_blocks:
+            block.bfloat16()
+    infinity_test.rng = torch.Generator(device=device)
+    return infinity_test
 
 def transform(pil_img, tgt_h, tgt_w):
     width, height = pil_img.size
@@ -381,9 +396,15 @@ if __name__ == '__main__':
     
     # load text encoder
     text_tokenizer, text_encoder = load_tokenizer(t5_path =args.text_encoder_ckpt)
+    text_encoder.cpu()
     # load vae
     vae = load_visual_tokenizer(args)
+    if args.bf16:
+        vae = vae.to(dtype=torch.bfloat16)
+    #vae.cpu()
+
     # load infinity
+    torch.cuda.empty_cache()
     infinity = load_transformer(vae, args)
     
     scale_schedule = dynamic_resolution_h_w[args.h_div_w_template][args.pn]['scales']
