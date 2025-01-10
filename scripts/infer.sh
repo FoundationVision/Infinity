@@ -8,7 +8,7 @@ use_bit_label=1
 checkpoint_type='torch'
 infinity_model_path=weights/infinity_2b_reg.pth
 vae_type=32
-vae_path=weights/infinity_vae_d32_reg.pth
+vae_path=weights/infinity_vae_d32reg.pth
 cfg=4
 tau=0.5
 rope2d_normalized_by_hw=2
@@ -22,6 +22,7 @@ apply_spatial_patchify=0
 python3 tools/run_infinity.py \
 --cfg ${cfg} \
 --tau ${tau} \
+--bf16 1 \
 --pn ${pn} \
 --model_path ${infinity_model_path} \
 --vae_type ${vae_type} \
@@ -38,6 +39,6 @@ python3 tools/run_infinity.py \
 --text_encoder_ckpt ${text_encoder_ckpt} \
 --text_channels ${text_channels} \
 --apply_spatial_patchify ${apply_spatial_patchify} \
---prompt "a beautifual Chinese woman in her late 30s, wearing a suit and tie, looking at the camera" \
+--prompt "a tornado made out of cake in the style of mad max" \
 --seed 1 \
 --save_file tmp.jpg

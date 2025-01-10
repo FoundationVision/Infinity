@@ -38,7 +38,7 @@ except ImportError:
 def precompute_rope2d_freqs_grid(dim, dynamic_resolution_h_w, rope2d_normalized_by_hw, pad_to_multiplier=1, max_height=2048 // 16, max_width=2048 // 16, base=10000.0, device=None, scaling_factor=1.0):
     # split the dimension into half, one for x and one for y
     half_dim = dim // 2
-    inv_freq = 1.0 / (base ** (torch.arange(0, half_dim, 2, dtype=torch.int64).float().to(device) / half_dim)) # namely theta, 1 / (10000^(i/half_dim)), i=0,2,..., half_dim-2
+    inv_freq = 1.0 / (base ** (torch.arange(0, half_dim, 2, dtype=torch.int64).to(device) / half_dim)) # namely theta, 1 / (10000^(i/half_dim)), i=0,2,..., half_dim-2
     t_height = torch.arange(max_height, device=device, dtype=torch.int64).type_as(inv_freq)
     t_width = torch.arange(max_width, device=device, dtype=torch.int64).type_as(inv_freq)
     t_height = t_height / scaling_factor
@@ -106,6 +106,7 @@ def apply_rotary_emb(q, k, scale_schedule, rope2d_freqs_grid, pad_to_multiplier,
         rope2d_freqs_grid[str(tuple(scale_schedule))] = rope2d_freqs_grid[str(tuple(scale_schedule))].to(qk.device)
         assert start+seq_len <= rope2d_freqs_grid[str(tuple(scale_schedule))].shape[4]
         rope_cache = rope2d_freqs_grid[str(tuple(scale_schedule))][:, :, :, :, start:start+seq_len] # rope_cache shape: [2, 1, 1, 1, seq_len, half_head_dim]
+        rope_cache = rope_cache.to(dtype=qk.dtype)
         qk = qk.reshape(*qk.shape[:-1], -1, 2) #(2, batch_size, heads, seq_len, half_head_dim, 2)
         qk = torch.stack([
             rope_cache[0] * qk[...,0] - rope_cache[1] * qk[...,1],
@@ -129,7 +130,7 @@ class FastRMSNorm(nn.Module):
     
     def forward(self, x):
         src_type = x.dtype
-        return rms_norm_impl(x.float(), self.weight, epsilon=self.eps).to(src_type)
+        return rms_norm_impl(x, self.weight, epsilon=self.eps).to(src_type)
     
     def extra_repr(self) -> str:
         return f'C={self.C}, eps={self.eps:g}, elementwise_affine={self.elementwise_affine}'
@@ -280,6 +281,7 @@ class SelfAttention(nn.Module):
         
         if self.cos_attn:   # always True
             scale_mul = self.scale_mul_1H11.clamp_max(self.max_scale_mul).exp() # 11H1 (flash), or 1H11 (not flash)
+            scale_mul = scale_mul.to(dtype=qkv.dtype)
             q = F.normalize(q, dim=-1, eps=1e-12).mul(scale_mul).contiguous()   # fp32
             k = F.normalize(k, dim=-1, eps=1e-12).contiguous()                  # fp32
             v = v.contiguous()                                                  # bf16
@@ -287,6 +289,9 @@ class SelfAttention(nn.Module):
             q = q.contiguous()      # bf16
             k = k.contiguous()      # bf16
             v = v.contiguous()      # bf16
+        q = q.to(dtype=qkv.dtype)
+        k = k.to(dtype=qkv.dtype)
+        v = v.to(dtype=qkv.dtype)
         if rope2d_freqs_grid is not None:
             q, k = apply_rotary_emb(q, k, scale_schedule, rope2d_freqs_grid, self.pad_to_multiplier, self.rope2d_normalized_by_hw, scale_ind) #, freqs_cis=freqs_cis)
         if self.caching:    # kv caching: only used during inference
@@ -394,7 +399,7 @@ class CrossAttention(nn.Module):
         cu_seqlens_q = torch.arange(0, Lq * (B+1), Lq, dtype=torch.int32, device=q_compact.device)
         if q_compact.dtype == torch.float32:    # todo: fp16 or bf16?
             oup = flash_attn_varlen_kvpacked_func(q=q_compact.to(dtype=torch.bfloat16), kv=kv_compact.to(dtype=torch.bfloat16), cu_seqlens_q=cu_seqlens_q, cu_seqlens_k=cu_seqlens_k, max_seqlen_q=Lq, max_seqlen_k=max_seqlen_k, dropout_p=0, softmax_scale=self.scale).reshape(B, Lq, -1)
-            oup = oup.float()
+            oup = oup
         else:
             oup = flash_attn_varlen_kvpacked_func(q=q_compact, kv=kv_compact, cu_seqlens_q=cu_seqlens_q, cu_seqlens_k=cu_seqlens_k, max_seqlen_q=Lq, max_seqlen_k=max_seqlen_k, dropout_p=0, softmax_scale=self.scale).reshape(B, Lq, -1)
         
@@ -440,8 +445,8 @@ class SelfAttnBlock(nn.Module):
                 gamma1, gamma2, scale1, scale2, shift1, shift2 = self.ada_lin(cond_BD).view(-1, 1, 6, self.C).unbind(2)
         
         if self.fused_ada_norm is None:
-            x = x + self.drop_path(self.attn( self.ln_wo_grad(x.float()).mul(scale1.add(1)).add_(shift1), attn_bias_or_two_vector=attn_bias_or_two_vector ).mul_(gamma1))
-            x = x + self.drop_path(self.ffn( self.ln_wo_grad(x.float()).mul(scale2.add(1)).add_(shift2) ).mul(gamma2)) # this mul(gamma2) cannot be in-placed cuz we possibly use FusedMLP
+            x = x + self.drop_path(self.attn( self.ln_wo_grad(x).mul(scale1.add(1)).add_(shift1), attn_bias_or_two_vector=attn_bias_or_two_vector ).mul_(gamma1))
+            x = x + self.drop_path(self.ffn( self.ln_wo_grad(x).mul(scale2.add(1)).add_(shift2) ).mul(gamma2)) # this mul(gamma2) cannot be in-placed cuz we possibly use FusedMLP
         else:
             x = x + self.drop_path(self.attn(self.fused_ada_norm(C=self.C, eps=self.norm_eps, x=x, scale=scale1, shift=shift1), attn_bias_or_two_vector=attn_bias_or_two_vector).mul_(gamma1))
             x = x + self.drop_path(self.ffn(self.fused_ada_norm(C=self.C, eps=self.norm_eps, x=x, scale=scale2, shift=shift2)).mul(gamma2)) # this mul(gamma2) cannot be in-placed cuz we possibly use FusedMLP
@@ -499,22 +504,22 @@ class CrossAttnBlock(nn.Module):
                 gamma1, gamma2, scale1, scale2, shift1, shift2 = self.ada_lin(cond_BD).view(-1, 1, 6, self.C).unbind(2)
         
         if self.fused_norm_func is None:
-            x_sa = self.ln_wo_grad(x.float()).mul(scale1.add(1)).add_(shift1)
+            x_sa = self.ln_wo_grad(x).mul(scale1.add(1)).add_(shift1)
             if self.checkpointing_sa_only and self.training:
                 x_sa = checkpoint(self.sa, x_sa, attn_bias_or_two_vector, attn_fn, scale_schedule, rope2d_freqs_grid, use_reentrant=False)
             else:
                 x_sa = self.sa(x_sa, attn_bias_or_two_vector, attn_fn, scale_schedule, rope2d_freqs_grid)
             x = x + self.drop_path(x_sa.mul_(gamma1))
-            x = x + self.ca(self.ca_norm(x), ca_kv).float().mul_(self.ca_gamma)
-            x = x + self.drop_path(self.ffn( self.ln_wo_grad(x.float()).mul(scale2.add(1)).add_(shift2) ).mul(gamma2)) # this mul(gamma2) cannot be in-placed cuz we possibly use FusedMLP
+            x = x + self.ca(self.ca_norm(x), ca_kv).mul_(self.ca_gamma)
+            x = x + self.drop_path(self.ffn( self.ln_wo_grad(x).mul(scale2.add(1)).add_(shift2) ).mul(gamma2)) # this mul(gamma2) cannot be in-placed cuz we possibly use FusedMLP
         else:
-            x_sa = self.fused_norm_func(C=self.C, eps=self.norm_eps, x=x, scale=scale1, shift=shift1)
+            x_sa = self.fused_norm_func(C=self.C, eps=self.norm_eps, x=x, scale=scale1, shift=shift1).to(dtype=x.dtype)
             if self.checkpointing_sa_only and self.training:
                 x_sa = checkpoint(self.sa, x_sa, attn_bias_or_two_vector, attn_fn, scale_schedule, rope2d_freqs_grid, use_reentrant=False)
             else:
                 x_sa = self.sa(x_sa, attn_bias_or_two_vector, attn_fn, scale_schedule, rope2d_freqs_grid, scale_ind=scale_ind)
             x = x + self.drop_path(x_sa.mul_(gamma1))
-            x = x + self.ca(self.ca_norm(x), ca_kv).float().mul_(self.ca_gamma)
+            x = x + self.ca(self.ca_norm(x), ca_kv).mul_(self.ca_gamma)
             x = x + self.drop_path(self.ffn(self.fused_norm_func(C=self.C, eps=self.norm_eps, x=x, scale=scale2, shift=shift2)).mul(gamma2)) # this mul(gamma2) cannot be in-placed cuz we possibly use FusedMLP
         return x
     
