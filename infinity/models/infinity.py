@@ -8,6 +8,7 @@ import time
 from contextlib import nullcontext
 from functools import partial
 from typing import List, Optional, Tuple, Union, Dict, Any
+from tqdm import tqdm
 
 import torch
 import torch.nn as nn
@@ -16,6 +17,7 @@ from timm.models import register_model
 from torch.utils.checkpoint import checkpoint
 from PIL import Image
 import numpy as np
+import gc
 # from torch.nn.attention.flex_attention import flex_attention
 
 import infinity.utils.dist as dist
@@ -339,8 +341,8 @@ class Infinity(nn.Module):
         :param tau: temperature
         :return: logits, shaped (B or batch_size, V or vocabulary_size)
         """
-        with torch.amp.autocast('cuda', enabled=False):
-            return self.head(self.head_nm(h.float(), cond_BD.float()))
+        #with torch.amp.autocast('cuda', enabled=False):
+        return self.head(self.head_nm(h, cond_BD))
 
     def add_lvl_embeding(self, feature, scale_ind, scale_schedule, need_to_pad=0):
         bs, seq_len, c = feature.shape
@@ -375,7 +377,7 @@ class Infinity(nn.Module):
         if cfg_infer:
             return self.autoregressive_infer_cfg(label_B_or_BLT=label_B_or_BLT, scale_schedule=scale_schedule, **kwargs)
         
-        x_BLC_wo_prefix = x_BLC_wo_prefix.float()       # input should be float32
+        x_BLC_wo_prefix = x_BLC_wo_prefix       # input should be float32
         B = x_BLC_wo_prefix.shape[0]
 
         # [1. get input sequence x_BLC]
@@ -389,7 +391,7 @@ class Infinity(nn.Module):
                 total += le
             must_on_graph = self.cfg_uncond[0, 0] * 0
             kv_compact = self.text_norm(kv_compact).contiguous()
-            sos = cond_BD = self.text_proj_for_sos((kv_compact, cu_seqlens_k, max_seqlen_k)).float().contiguous()    # cond_BD should be float32
+            sos = cond_BD = self.text_proj_for_sos((kv_compact, cu_seqlens_k, max_seqlen_k)).contiguous()    # cond_BD should be float32
             kv_compact = self.text_proj_for_ca(kv_compact).contiguous()
             kv_compact[0, 0] += must_on_graph
             ca_kv = kv_compact, cu_seqlens_k, max_seqlen_k
@@ -508,7 +510,7 @@ class Infinity(nn.Module):
         last_stage = sos.unsqueeze(1).expand(bs, 1, -1) + self.pos_start.expand(bs, 1, -1)
 
         with torch.amp.autocast('cuda', enabled=False):
-            cond_BD_or_gss = self.shared_ada_lin(cond_BD.float()).float().contiguous()
+            cond_BD_or_gss = self.shared_ada_lin(cond_BD).contiguous()
         accu_BChw, cur_L, ret = None, 0, []  # current length, list of reconstructed images
         idx_Bl_list, idx_Bld_list = [], []
 
@@ -536,7 +538,7 @@ class Infinity(nn.Module):
         
         num_stages_minus_1 = len(scale_schedule)-1
         summed_codes = 0
-        for si, pn in enumerate(scale_schedule):   # si: i-th segment
+        for si, pn in tqdm(enumerate(scale_schedule)):   # si: i-th segment
             cfg = cfg_list[si]
             if si >= trunk_scale:
                 break
@@ -559,7 +561,10 @@ class Infinity(nn.Module):
                 if not self.add_lvl_embeding_only_first_block: 
                     last_stage = self.add_lvl_embeding(last_stage, si, scale_schedule, need_to_pad=need_to_pad)
                 
+                
                 for m in b.module:
+                    gc.collect()
+                    torch.cuda.empty_cache()
                     last_stage = m(x=last_stage, cond_BD=cond_BD_or_gss, ca_kv=ca_kv, attn_bias_or_two_vector=None, attn_fn=attn_fn, scale_schedule=scale_schedule, rope2d_freqs_grid=self.rope2d_freqs_grid, scale_ind=si)
                     if (cfg != 1) and (layer_idx in abs_cfg_insertion_layers):
                         # print(f'add cfg={cfg} on {layer_idx}-th layer output')
@@ -609,7 +614,7 @@ class Infinity(nn.Module):
             else:
                 if si < gt_leak:
                     idx_Bl = gt_ls_Bl[si]
-                h_BChw = self.quant_only_used_in_inference[0].embedding(idx_Bl).float()   # BlC
+                h_BChw = self.quant_only_used_in_inference[0].embedding(idx_Bl)   # BlC
 
                 # h_BChw = h_BChw.float().transpose_(1, 2).reshape(B, self.d_vae, scale_schedule[si][0], scale_schedule[si][1])
                 h_BChw = h_BChw.transpose_(1, 2).reshape(B, self.d_vae, scale_schedule[si][0], scale_schedule[si][1], scale_schedule[si][2])
