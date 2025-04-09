@@ -99,7 +99,7 @@ You can load these models to generate images via the codes in [interactive_infer
 ## ⚽️ Installation
 1. We use FlexAttention to speedup training, which requires `torch>=2.5.1`.
 2. Install other pip packages via `pip3 install -r requirements.txt`.
-3. Donload weights from huggingface. Besides vae & transformers weights on <a href='https://huggingface.co/FoundationVision/infinity'><img src='https://img.shields.io/badge/%F0%9F%A4%97%20weights-FoundationVision/Infinity-yellow'></a>, you should also download [flan-t5-xl](https://huggingface.co/google/flan-t5-xl).
+3. Download weights from huggingface. Besides vae & transformers weights on <a href='https://huggingface.co/FoundationVision/infinity'><img src='https://img.shields.io/badge/%F0%9F%A4%97%20weights-FoundationVision/Infinity-yellow'></a>, you should also download [flan-t5-xl](https://huggingface.co/google/flan-t5-xl).
 ```
 from transformers import T5Tokenizer, T5ForConditionalGeneration
 tokenizer = T5Tokenizer.from_pretrained("google/flan-t5-xl")
