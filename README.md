@@ -20,6 +20,8 @@
 <p>
 
 ## 🔥 Updates!!
+
+* Nov 7, 2025: 🔥 We Release our Text-to-Video generation research based on VAR & Infinity, please check [Infinity⭐️](https://github.com/FoundationVision/InfinityStar).
 * Jun 24, 2025: 🍉 Release a middle stage model of Infinity-8B generating 512x512 images.
 * May 25, 2025: 🔥 Release Infinity Image tokenizer training code & setting, Check [Link](https://github.com/FoundationVision/BitVAE)
 * Apr 24, 2025: 🔥 Infinity is accepted as CVPR 2025 Oral.
