@@ -100,7 +100,7 @@ We provide Infinity models for you to play with, which are on <a href='https://h
 |  Infinity-8B   |  512  |  -  |    -    |  -   | [infinity_8b_512x512_weights](https://huggingface.co/FoundationVision/Infinity/tree/main/infinity_8b_512x512_weights) |
 |  Infinity-20B   |  1024  |  -  |    -    |  -   | [Coming Soon](TBD) |
 
-${\dagger}$ result is tested with a [prompt rewriter](tools/prompt_rewriter.py). 
+${\dagger}$ result is tested with a [prompt rewriter](tools/prompt_rewriter.py).
 
 You can load these models to generate images via the codes in [interactive_infer.ipynb](tools/interactive_infer.ipynb) and [interactive_infer_8b.ipynb](tools/interactive_infer_8b.ipynb) .
 
@@ -169,6 +169,32 @@ A folder named `local_output` will be created to save the checkpoints and logs.
 You can monitor the training process by checking the logs in `local_output/log.txt` and `local_output/stdout.txt`. We highly recommend you use [wandb](https://wandb.ai/site/) for detailed logging.
 
 If your experiment is interrupted, just rerun the command, and the training will **automatically resume** from the last checkpoint in `local_output/ckpt*.pth`.
+
+## 🤖 LLM Provider Configuration (Prompt Rewriter)
+
+The [prompt rewriter](tools/prompt_rewriter.py) uses an LLM to refine short prompts into detailed image descriptions. It supports multiple LLM providers via environment variables:
+
+| Provider | Env Vars | Default Model |
+|----------|----------|---------------|
+| OpenAI | `OPENAI_API_KEY` | gpt-4o |
+| Azure OpenAI | `AZURE_OPENAI_API_KEY`, `AZURE_OPENAI_ENDPOINT` | gpt-4o |
+| [MiniMax](https://www.minimax.io/) | `MINIMAX_API_KEY` | MiniMax-M2.7 |
+| Custom (OpenAI-compatible) | `LLM_API_KEY`, `LLM_BASE_URL` | gpt-4o |
+
+**Quick start:**
+```bash
+# Use OpenAI
+export OPENAI_API_KEY=sk-...
+
+# Or use MiniMax
+export MINIMAX_API_KEY=...
+
+# Or use any OpenAI-compatible API
+export LLM_BASE_URL=http://localhost:8000/v1
+export LLM_API_KEY=...
+```
+
+The provider is auto-detected from available environment variables. You can also set `LLM_PROVIDER` explicitly (`openai`, `azure`, `minimax`) and override the model with `LLM_MODEL`. See [tools/llm_provider.py](tools/llm_provider.py) for full documentation.
 
 ## 🍭 Evaluation
 We provide [eval.sh](scripts/eval.sh) for evaluation on various benchmarks with only one command. In particular, [eval.sh](scripts/eval.sh) supports evaluation on commonly used metrics such as [GenEval](https://github.com/djghosh13/geneval), [ImageReward](https://github.com/THUDM/ImageReward), [HPSv2.1](https://github.com/tgxs002/HPSv2), FID and Validation Loss. Please refer to [evaluation/README.md](evaluation/README.md) for more details.
