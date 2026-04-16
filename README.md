@@ -20,7 +20,7 @@
 <p>
 
 ## 🔥 Updates!!
-
+* April 16, 2026: 🔥 We Release [GRN](https://github.com/MGenAI/GRN), a next-generation visual synthesis framework. Neither diffusion nor autoregressive — GRN is a third way. 🧠 Refines globally like an artist. ⚡ Generates adaptively by complexity. 🏆 New SOTA across image & video. The visual generation paradigm just got rewritten.
 * Nov 7, 2025: 🔥 We Release our Text-to-Video generation based on VAR & Infinity, please check [Infinity⭐️](https://github.com/FoundationVision/InfinityStar).
 * Jun 24, 2025: 🍉 Release a middle stage model of Infinity-8B generating 512x512 images.
 * May 25, 2025: 🔥 Release Infinity Image tokenizer training code & setting, Check [Link](https://github.com/FoundationVision/BitVAE)
@@ -39,7 +39,6 @@ We provide a [demo website](https://opensource.bytedance.com/gmpt/t2i/invite) fo
 We also provide [interactive_infer.ipynb](tools/interactive_infer.ipynb) and [interactive_infer_8b.ipynb](tools/interactive_infer_8b.ipynb) for you to see more technical details about Infinity-2B & Infinity-8B.
 
 ## 📑 Open-Source Plan
-  - [ ] Infinity-20B Checkpoints
   - [x] Infinity Image tokenizer training code & setting
   - [x] Infinity-8B Checkpoints (512x512)
   - [x] Infinity-8B Checkpoints (1024x1024)
